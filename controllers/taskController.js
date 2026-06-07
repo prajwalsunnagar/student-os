@@ -1,39 +1,67 @@
 const db = require("../config/db");
 
-const getTasks = async (req, res) => {
+const getTasks = async (req, res,next) => {
     try {
         const userId = req.user.userId;
 
-        const result = await db.query(
-            "SELECT * FROM tasks WHERE user_id = $1",
-            [userId]
-        );
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const completed = req.query.completed;
+        const offset = (page - 1) * limit;
+        const search = req.query.search;
+      const result = await db.query(
+    `SELECT *
+     FROM tasks
+     WHERE user_id = $1
+     AND deleted = FALSE
 
+     AND (
+        $2::text IS NULL
+        OR title ILIKE '%' || $2 || '%'
+     )
+
+     AND (
+        $3::boolean IS NULL
+        OR completed = $3
+     )
+
+     LIMIT $4
+     OFFSET $5`,
+    [
+        userId,
+        search || null,
+        completed !== undefined ? completed === "true" : null,
+        limit,
+        offset
+    ]
+);
         res.json(result.rows);
     } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            message: "Error fetching tasks",
-        });
+        next(error);
     }
 };
 
-const getTaskById = async (req, res) => {
+const getTaskById = async (req, res, next) => {
     try {
         const id = req.params.id;
         const userId = req.user.userId;
 
-        const result = await db.query(
-            "SELECT * FROM tasks WHERE id = $1 AND user_id = $2",
-            [id, userId]
-        );
+       const result = await db.query(
+    `SELECT *
+     FROM tasks
+     WHERE id = $1
+     AND user_id = $2
+     AND deleted = FALSE`,
+    [id, userId]
+);
+      if (result.rows.length === 0) {
+    const error =
+        new Error("Task not found");
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: "Task not found",
-            });
-        }
+    error.statusCode = 404;
+
+    return next(error);
+}
 
         res.json(result.rows[0]);
     } catch (error) {
@@ -46,6 +74,8 @@ const getTaskById = async (req, res) => {
 };
 
 const createTask = async (req, res) => {
+    const client = await db.connect();
+
     try {
         const { title, completed } = req.body;
 
@@ -60,23 +90,45 @@ const createTask = async (req, res) => {
 
         const userId = req.user.userId;
 
-        const result = await db.query(
-            `INSERT INTO tasks (title, completed, user_id)
+        await client.query("BEGIN");
+
+        const taskResult = await client.query(
+            `INSERT INTO tasks
+             (title, completed, user_id)
              VALUES ($1, $2, $3)
              RETURNING *`,
             [title, taskCompleted, userId]
         );
 
+        await client.query(
+            `INSERT INTO audit_logs
+             (user_id, task_id, action)
+             VALUES ($1, $2, $3)`,
+            [
+                userId,
+                taskResult.rows[0].id,
+                "CREATE_TASK",
+            ]
+        );
+
+        await client.query("COMMIT");
+
         res.status(201).json({
             message: "Task created successfully",
-            task: result.rows[0],
+            task: taskResult.rows[0],
         });
+
     } catch (error) {
+        await client.query("ROLLBACK");
+
         console.error(error);
 
         res.status(500).json({
             message: "Error creating task",
         });
+
+    } finally {
+        client.release();
     }
 };
 
@@ -105,6 +157,7 @@ const updateTask = async (req, res) => {
                  completed = $2
              WHERE id = $3
              AND user_id = $4
+             AND deleted = FALSE
              RETURNING *`,
             [title, completed, id, userId]
         );
@@ -133,13 +186,15 @@ const deleteTask = async (req, res) => {
         const id = req.params.id;
         const userId = req.user.userId;
 
-        const result = await db.query(
-            `DELETE FROM tasks
-             WHERE id = $1
-             AND user_id = $2
-             RETURNING *`,
-            [id, userId]
-        );
+       const result = await db.query(
+    `UPDATE tasks
+     SET deleted = TRUE
+     WHERE id = $1
+     AND user_id = $2
+     AND deleted = FALSE
+     RETURNING *`,
+    [id, userId]
+);
 
         if (result.rows.length === 0) {
             return res.status(404).json({
