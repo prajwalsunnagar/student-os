@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
-
+import { API_BASE_URL } from './config';
 function App() {
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('student_os_user');
@@ -37,56 +37,88 @@ function App() {
 
   // Unified fetch helper that automatically adds Authorization header and handles token refreshing
   const apiFetch = useCallback(async (url, options = {}) => {
-    let currentUser = user;
-    if (!currentUser) {
-      const savedUser = localStorage.getItem('student_os_user');
-      if (savedUser) {
-        currentUser = JSON.parse(savedUser);
-      }
+  let currentUser = user;
+
+  if (!currentUser) {
+    const savedUser = localStorage.getItem('student_os_user');
+    if (savedUser) {
+      currentUser = JSON.parse(savedUser);
     }
+  }
 
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    };
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
 
-    if (currentUser?.accessToken) {
-      headers['Authorization'] = `Bearer ${currentUser.accessToken}`;
-    }
+  if (currentUser?.accessToken) {
+    headers['Authorization'] = `Bearer ${currentUser.accessToken}`;
+  }
 
-    let response = await fetch(url, { ...options, headers });
+  let response = await fetch(
+    `${API_BASE_URL}${url}`,
+    { ...options, headers }
+  );
 
-    // Handle token expired (401)
-    if (response.status === 401 && currentUser?.refreshToken) {
-      try {
-        const refreshResponse = await fetch('/users/refresh', {
+  // Handle token expired (401)
+  if (response.status === 401 && currentUser?.refreshToken) {
+    try {
+      const refreshResponse = await fetch(
+        `${API_BASE_URL}/users/refresh`,
+        {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken: currentUser.refreshToken })
-        });
-
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
-          const updatedUser = { ...currentUser, accessToken: refreshData.accessToken };
-          localStorage.setItem('student_os_user', JSON.stringify(updatedUser));
-          setUser(updatedUser);
-
-          // Retry original request with new token
-          headers['Authorization'] = `Bearer ${refreshData.accessToken}`;
-          response = await fetch(url, { ...options, headers });
-        } else {
-          // Refresh token is invalid, force logout
-          logout();
-          addToast('Session expired. Please log in again.', 'error');
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            refreshToken: currentUser.refreshToken
+          })
         }
-      } catch (err) {
-        logout();
-        addToast('Network error during session refresh.', 'error');
-      }
-    }
+      );
 
-    return response;
-  }, [user, logout, addToast]);
+      if (refreshResponse.ok) {
+        const refreshData =
+          await refreshResponse.json();
+
+        const updatedUser = {
+          ...currentUser,
+          accessToken:
+            refreshData.accessToken
+        };
+
+        localStorage.setItem(
+          'student_os_user',
+          JSON.stringify(updatedUser)
+        );
+
+        setUser(updatedUser);
+
+        headers['Authorization'] =
+          `Bearer ${refreshData.accessToken}`;
+
+        response = await fetch(
+          `${API_BASE_URL}${url}`,
+          { ...options, headers }
+        );
+      } else {
+        logout();
+        addToast(
+          'Session expired. Please log in again.',
+          'error'
+        );
+      }
+    } catch (err) {
+      logout();
+
+      addToast(
+        'Network error during session refresh.',
+        'error'
+      );
+    }
+  }
+
+  return response;
+},[user, logout, addToast]);
 
   return (
     <>

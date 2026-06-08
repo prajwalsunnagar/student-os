@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User, LogIn, UserPlus, GraduationCap } from 'lucide-react';
-
+import { API_BASE_URL } from '../config';
 function Auth({ login, addToast }) {
   const [isLoginTab, setIsLoginTab] = useState(true);
   const [formData, setFormData] = useState({
@@ -44,8 +44,9 @@ function Auth({ login, addToast }) {
     if (!validateForm()) return;
 
     setLoading(true);
-    const endpoint = isLoginTab ? '/users/login' : '/users/register';
-    
+
+    const endpoint = isLoginTab ? `${API_BASE_URL}/users/login` : `${API_BASE_URL}/users/register`;
+
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -65,14 +66,13 @@ function Auth({ login, addToast }) {
       } else {
         // Success register
         addToast('Registration successful! Logging you in...', 'success');
-        
-        // Auto login after registration
-        const loginResponse = await fetch('/users/login', {
+
+        const loginResponse = await fetch(`${API_BASE_URL}/users/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: formData.email,
-            password: formData.password
+            password: formData.password,
           }),
         });
 
