@@ -58,7 +58,7 @@ const loginUser = async (req, res) => {
         "SELECT * FROM users WHERE email = $1",
         [normalizedEmail]
     );
-
+    console.log(userResult.rows);
     if (userResult.rows.length === 0) {
         return res.status(400).json({
             message: "Invalid email or password",
